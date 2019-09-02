@@ -61,9 +61,9 @@ find_package(Threads)
 find_package(Boost 1.60 REQUIRED COMPONENTS container)
 find_package(Qt5Widgets REQUIRED)
 
-find_package(OpenCV 4.1 REQUIRED)
+find_package(OpenCV 3.2 REQUIRED)
 find_package(OpenGL REQUIRED)
-find_package(FFmpeg 58.35 REQUIRED COMPONENTS avcodec avutil avformat swscale)
+find_package(FFmpeg 57.00 REQUIRED COMPONENTS avcodec avutil avformat swscale)
 
 
 #
