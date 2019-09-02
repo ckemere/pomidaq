@@ -575,7 +575,7 @@ void MiniScope::captureThread(void* msPtr)
         }
 
         auto status = self->d->cam.grab();
-        double frameTimestamp = self->d->cam.get(CV_CAP_PROP_POS_MSEC); // Driver generated millisecond timestamps
+        double frameTimestamp = self->d->cam.get(cv::CAP_PROP_POS_MSEC); // Driver generated millisecond timestamps
                                                                         // Note that annoyingly, the driver may force frame 1 to 0.0
 
         if (!status) {
