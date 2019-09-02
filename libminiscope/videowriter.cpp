@@ -185,6 +185,7 @@ void VideoWriter::initializeInternal()
     // open output format context
     int ret;
     d->octx = nullptr;
+    av_register_all();
     ret = avformat_alloc_output_context2(&d->octx, nullptr, nullptr, fname.c_str());
     if (ret < 0)
         throw std::runtime_error(boost::str(boost::format("Failed to allocate output context: %1%") % ret));
