@@ -26,6 +26,7 @@
 #include <mutex>
 #include <queue>
 #include <fstream>
+ #include <iomanip>
 #include <boost/format.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 extern "C" {
@@ -71,7 +72,7 @@ public:
     std::string lastError;
     std::thread *thread;
     std::mutex mutex;
-    std::queue<std::pair<cv::Mat, std::chrono::milliseconds>> frameQueue;
+    std::queue<std::pair<cv::Mat, double>> frameQueue; // (frame, timestamp in milliseconds)
 
     std::string fnameBase;
     uint fileSliceIntervalMin;
@@ -93,6 +94,10 @@ public:
     AVFrame *inputFrame;
     int64_t framePts;
     uchar *alignedInput;
+
+    bool isFirstFrame;
+    double firstFrameTimestamp;
+
 
     AVFormatContext *octx;
     AVStream *vstrm;
@@ -399,6 +404,8 @@ void VideoWriter::initialize(std::string fname, int width, int height, int fps, 
     d->fps = {fps, 1};
     d->frames_n = 0;
     d->saveTimestamps = saveTimestamps;
+    d->isFirstFrame = true;
+    d->firstFrameTimestamp = 0.0;
     d->currentSliceNo = 1;
     if (fname.substr(fname.find_last_of(".") + 1).length() == 3)
         d->fnameBase = fname.substr(0, fname.length() - 4); // remove 3-char suffix from filename
@@ -482,7 +489,7 @@ bool VideoWriter::prepareFrame(const cv::Mat &image)
     return true;
 }
 
-bool VideoWriter::encodeFrame(const cv::Mat &frame, const std::chrono::milliseconds &timestamp)
+bool VideoWriter::encodeFrame(const cv::Mat &frame, const double &timestamp)
 {
     int ret;
 
@@ -515,13 +522,18 @@ bool VideoWriter::encodeFrame(const cv::Mat &frame, const std::chrono::milliseco
     d->frames_n++;
     av_packet_unref(&pkt);
 
+    // log first timestamp to keep track of frame times
+    if (d->isFirstFrame) {
+        d->firstFrameTimestamp = timestamp;
+        d->isFirstFrame = false;
+    }
+
     // store timestamp (if necessary)
-    const auto tsMsec = timestamp.count();
     if (d->saveTimestamps)
-        d->timestampFile << d->framePts << "; " << tsMsec << "\n";
+        d->timestampFile << d->framePts << "; " << std::fixed << std::setprecision(4) << timestamp << "\n";
 
     if (d->fileSliceIntervalMin != 0) {
-        const auto tsMin = static_cast<double>(tsMsec) / 1000.0 / 60.0;
+        const auto tsMin = (timestamp - d->firstFrameTimestamp) / 1000.0 / 60.0;
         if (tsMin > (d->fileSliceIntervalMin * d->currentSliceNo)) {
             try {
                 // we need to start a new file now since the maximum time for this file has elapsed,
@@ -567,7 +579,7 @@ void VideoWriter::stopEncodeThread()
     d->thread = nullptr;
 }
 
-bool VideoWriter::pushFrame(const cv::Mat &frame, const std::chrono::milliseconds &time)
+bool VideoWriter::pushFrame(const cv::Mat &frame, const double &timestamp)
 {
     std::lock_guard<std::mutex> lock(d->mutex);
     if (!d->acceptFrames)
@@ -577,7 +589,7 @@ bool VideoWriter::pushFrame(const cv::Mat &frame, const std::chrono::millisecond
         return false;
     }
 
-    d->frameQueue.push(std::make_pair(frame, time));
+    d->frameQueue.push(std::make_pair(frame, timestamp));
     return true;
 }
 
@@ -647,14 +659,14 @@ void VideoWriter::encodeThread(void *vwPtr)
 
     while (self->d->acceptFrames) {
         cv::Mat frame;
-        std::chrono::milliseconds timestamp;
+        double timestamp;
         while (self->getNextFrameFromQueue(&frame, &timestamp)) {
             self->encodeFrame(frame, timestamp);
         }
     }
 }
 
-bool VideoWriter::getNextFrameFromQueue(cv::Mat *frame, std::chrono::milliseconds *timestamp)
+bool VideoWriter::getNextFrameFromQueue(cv::Mat *frame, double *timestamp)
 {
     std::lock_guard<std::mutex> lock(d->mutex);
     if (d->frameQueue.empty())

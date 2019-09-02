@@ -101,7 +101,8 @@ public:
 
     std::atomic<size_t> droppedFramesCount;
     std::atomic_uint currentFPS;
-    std::atomic<std::chrono::milliseconds> lastRecordedFrameTime;
+    std::atomic<double> lastRecordedFrameTime; // this is in milliseconds (and is not atomic for arithmetic)
+    double firstFrameTime;
 
     boost::circular_buffer<cv::Mat> frameRing;
 
@@ -500,7 +501,7 @@ std::string MiniScope::lastError() const
     return d->lastError;
 }
 
-std::chrono::milliseconds MiniScope::lastRecordedFrameTime() const
+double MiniScope::lastRecordedFrameTime() const
 {
     return d->lastRecordedFrameTime;
 }
@@ -551,6 +552,7 @@ void MiniScope::captureThread(void* msPtr)
     std::unique_ptr<VideoWriter> vwriter(new VideoWriter());
     auto recordFrames = false;
     auto recordStartTime = steady_hr_clock::now();
+    double firstFrameTimestamp = 0.0;
 
     while (self->d->running) {
         cv::Mat frame;
@@ -573,7 +575,9 @@ void MiniScope::captureThread(void* msPtr)
         }
 
         auto status = self->d->cam.grab();
-        auto frameTimestamp = std::chrono::duration_cast<std::chrono::milliseconds>(steady_hr_clock::now() - recordStartTime);
+        double frameTimestamp = self->d->cam.get(CV_CAP_PROP_POS_MSEC); // Driver generated millisecond timestamps
+                                                                        // Note that annoyingly, the driver may force frame 1 to 0.0
+
         if (!status) {
             self->fail("Failed to grab frame.");
             break;
@@ -641,7 +645,7 @@ void MiniScope::captureThread(void* msPtr)
                 recordFrames = true;
                 self->emitMessage("Initialized video recording.");
                 recordStartTime = steady_hr_clock::now();
-                frameTimestamp = std::chrono::milliseconds(0); // first frame happens at 0 time elapsed
+                firstFrameTimestamp = frameTimestamp; // Hopefully not 0 if we displayed a few frames first!
             }
         } else {
             // we are not recording or stopped recording
@@ -653,7 +657,7 @@ void MiniScope::captureThread(void* msPtr)
                 vwriter.reset(new VideoWriter());
                 recordFrames = false;
                 self->emitMessage("Recording finalized.");
-                self->d->lastRecordedFrameTime = std::chrono::milliseconds(0);
+                self->d->lastRecordedFrameTime = 0.0; // reset to 0.0 milliseconds
             }
         }
 
@@ -712,7 +716,7 @@ void MiniScope::captureThread(void* msPtr)
         if (recordFrames) {
             if (!vwriter->pushFrame(frame, frameTimestamp))
                 self->fail(boost::str(boost::format("Unable to send frames to encoder: %1%") % vwriter->lastError()));
-            self->d->lastRecordedFrameTime = frameTimestamp;
+            self->d->lastRecordedFrameTime = frameTimestamp - firstFrameTimestamp;
         }
 
         // wait a bit if necessary, to keep the right framerate
@@ -727,5 +731,5 @@ void MiniScope::captureThread(void* msPtr)
 
     // finalize recording (if there was any still ongoing)
     vwriter->finalize();
-    self->d->lastRecordedFrameTime = std::chrono::milliseconds(0);
+    self->d->lastRecordedFrameTime = 0.0;
 }
